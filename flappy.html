@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Neon Starfighter 3D</title>
+  <style>
+    /* Changed to a modern, squared sci-fi font matching the screenshot */
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+    }
+
+    body,
+    html {
+      width: 100%;
+      height: 100%;
+      /* Deep dark blue/purple space gradient */
+      background: radial-gradient(circle at 50% 50%, #15142b 0%, #080914 100%);
+      overflow: hidden;
+      font-family: 'Orbitron', sans-serif;
+      color: #fff;
+      touch-action: none;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      z-index: 10;
+    }
+
+    .screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      background: rgba(8, 9, 20, 0.85);
+      padding: 2rem 3rem;
+      border: 2px solid #00d4ff;
+      border-radius: 8px;
+      box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
+      pointer-events: auto;
+    }
+
+    .screen.active {
+      display: flex;
+    }
+
+    h1 {
+      color: #fff;
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      letter-spacing: 2px;
+    }
+
+    p {
+      font-size: 14px;
+      color: #a0a5b5;
+      margin-bottom: 25px;
+      line-height: 1.8;
+      letter-spacing: 1px;
+    }
+
+    .btn {
+      background: transparent;
+      color: #00d4ff;
+      border: 2px solid #00d4ff;
+      padding: 12px 30px;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      border-radius: 4px;
+      text-transform: uppercase;
+      transition: all 0.2s;
+      letter-spacing: 1px;
+    }
+
+    .btn:hover,
+    .btn:active {
+      background: #00d4ff;
+      color: #080914;
+      box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+    }
+
+    /* Clean Top-Centered HUD */
+    #hud {
+      position: absolute;
+      top: 6%;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      display: none;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    #current-score {
+      font-size: 42px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 5px;
+    }
+
+    #best-score-hud {
+      font-size: 14px;
+      color: #a0a5b5;
+      letter-spacing: 1.5px;
+    }
+
+    #speed-up-indicator {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      font-size: 14px;
+      color: #00d4ff;
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+  </style>
+  <!-- Include Three.js for 3D rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="ui-layer">
+    <!-- Start Screen -->
+    <div id="start-screen" class="screen active">
+      <h1>STARFIGHTER</h1>
+      <p>Tap, Click, or Spacebar<br>to fire thrusters.</p>
+      <button class="btn" id="start-btn">ENGAGE</button>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="screen">
+      <h1 style="color: #ff3366;">SYSTEM FAILURE</h1>
+      <p id="final-score" style="color: #fff; font-size: 18px;">Score: 0</p>
+      <button class="btn" id="restart-btn">REBOOT</button>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div id="current-score">0</div>
+    <div id="best-score-hud">BEST: 0</div>
+  </div>
+  <div id="speed-up-indicator">SPEED UP!</div>
+
+  <script>
+    // UI Elements
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const hud = document.getElementById('hud');
+    const currentScoreEl = document.getElementById('current-score');
+    const bestScoreEl = document.getElementById('best-score-hud');
+    const finalScoreEl = document.getElementById('final-score');
+    const speedUpIndicator = document.getElementById('speed-up-indicator');
+
+    // Prevent mobile dragging/scrolling
+    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+    // High Score Storage
+    let memoryHighScore = 0;
+    try {
+      const savedScore = localStorage.getItem('starfighter3D_HighScore');
+      if (savedScore) memoryHighScore = parseInt(savedScore, 10);
+    } catch (e) {
+      console.warn("Local storage unavailable.");
+    }
+    bestScoreEl.innerText = `BEST: ${memoryHighScore}`;
+
+    // Game State & Config
+    let state = 'START';
+    const config = {
+      gravity: -0.08,
+      boost: 1.2,
+      baseSpeed: 0.45,
+      pillarRadius: 3.5,
+      pillarGap: 20,
+      spawnDistance: 38,
+      shipWidth: 10,
+      shipHeight: 5,
+      visibleYLimit: 24
+    };
+
+    let game = { score: 0, speed: config.baseSpeed };
+
+    // Three.js Globals
+    let scene, camera, renderer;
+    let shipGroup, shipMesh, shipVelocity = 0;
+    let pillars = [];
+    let particles = [];
+    let starsSystem;
+    let floorLine;
+    let shipXPos = -10;
+
+    // Materials & Geometries
+    const pillarGeo = new THREE.CylinderGeometry(config.pillarRadius, config.pillarRadius, 60, 32);
+    const pillarMatCore = new THREE.MeshStandardMaterial({
+      color: 0x161c2b, // Smooth dark blue/grey from screenshot
+      metalness: 0.1,
+      roughness: 0.6
+    });
+
+    // The glowing cyan cap geometry and material
+    const capGeo = new THREE.CylinderGeometry(config.pillarRadius + 0.1, config.pillarRadius + 0.1, 0.4, 32);
+    const capMat = new THREE.MeshBasicMaterial({ color: 0x00d4ff }); // Bright cyan glow
+
+    // Fire Particle Geometry
+    const fireGeo = new THREE.SphereGeometry(0.5, 8, 8);
+
+    // Procedural Jet Fallback (In case image is blocked)
+    function createJetFighter() {
+      const jet = new THREE.Group();
+      const hullMat = new THREE.MeshStandardMaterial({ color: 0x3a4a6b, metalness: 0.3, roughness: 0.4 });
+      const darkMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+
+      const bodyGeo = new THREE.CylinderGeometry(0.6, 0.9, 6, 16); bodyGeo.rotateZ(Math.PI / 2);
+      jet.add(new THREE.Mesh(bodyGeo, hullMat));
+
+      const noseGeo = new THREE.ConeGeometry(0.6, 3, 16); noseGeo.rotateZ(-Math.PI / 2);
+      const nose = new THREE.Mesh(noseGeo, hullMat); nose.position.x = 4.5; jet.add(nose);
+
+      const wingGeo = new THREE.CylinderGeometry(0.05, 3, 4, 3); wingGeo.rotateY(-Math.PI / 2); wingGeo.rotateZ(Math.PI / 2);
+      const wing = new THREE.Mesh(wingGeo, hullMat); wing.position.set(-1, 0, 0); wing.scale.set(1, 0.05, 1.5); jet.add(wing);
+
+      return jet;
+    }
+
+    function initThree() {
+      const canvas = document.getElementById('gameCanvas');
+
+      // Renderer with transparent background to show CSS gradient
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setClearColor(0x000000, 0);
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.z = 45;
+
+      // Lighting - Clean white directional light pointing straight for smooth cylinder shading
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(0, 0, 20); // Front light
+      scene.add(dirLight);
+
+      // Group to hold whatever ship we use
+      shipGroup = new THREE.Group();
+      shipGroup.position.set(shipXPos, 0, 0);
+      scene.add(shipGroup);
+
+      // Attempt to load provided image as the ship
+      const textureLoader = new THREE.TextureLoader();
+      const shipPlaneGeo = new THREE.PlaneGeometry(config.shipWidth, config.shipHeight);
+
+      const shipShaderMat = new THREE.ShaderMaterial({
+        uniforms: { tDiffuse: { value: null } },
+        vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+                    precision mediump float;
+                    uniform sampler2D tDiffuse;
+                    varying vec2 vUv;
+                    void main() {
+                        vec4 color = texture2D(tDiffuse, vUv);
+                        if(dot(color.rgb, vec3(0.299, 0.587, 0.114)) < 0.08) discard; // Remove black bg
+                        gl_FragColor = color;
+                    }`,
+        transparent: true, side: THREE.DoubleSide
+      });
+
+      shipMesh = new THREE.Mesh(shipPlaneGeo, shipShaderMat);
+
+      textureLoader.load('Gemini_Generated_Image_uuygz1uuygz1uuyg.jpg',
+        (tex) => {
+          shipShaderMat.uniforms.tDiffuse.value = tex;
+          shipGroup.add(shipMesh); // Image loaded successfully
+        },
+        undefined,
+        (err) => {
+          // Fallback to 3D jet if image fails
+          console.log("Image not found, using procedural jet fallback.");
+          const fallbackJet = createJetFighter();
+          shipGroup.add(fallbackJet);
+        }
+      );
+
+      // Background Stars
+      const starsGeo = new THREE.BufferGeometry();
+      const posArray = new Float32Array(300 * 3);
+      for (let i = 0; i < 900; i += 3) {
+        posArray[i] = (Math.random() - 0.5) * 200;
+        posArray[i + 1] = (Math.random() - 0.5) * 100;
+        posArray[i + 2] = (Math.random() - 0.5) * 40 - 20;
+      }
+      starsGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+      starsSystem = new THREE.Points(starsGeo, new THREE.PointsMaterial({ size: 0.4, color: 0xffffff, transparent: true, opacity: 0.6 }));
+      scene.add(starsSystem);
+
+      // Bottom Floor Line
+      const floorGeo = new THREE.PlaneGeometry(200, 0.3);
+      floorLine = new THREE.Mesh(floorGeo, capMat);
+      floorLine.position.y = -config.visibleYLimit + 1;
+      scene.add(floorLine);
+
+      window.addEventListener('resize', onWindowResize, false);
+      animate();
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function resetGame() {
+      shipGroup.position.set(shipXPos, 0, 0);
+      shipGroup.rotation.z = 0;
+      shipVelocity = 0;
+
+      pillars.forEach(p => scene.remove(p.group));
+      pillars = [];
+      particles.forEach(p => scene.remove(p.mesh));
+      particles = [];
+
+      game.score = 0;
+      game.speed = config.baseSpeed;
+      currentScoreEl.innerText = game.score;
+      bestScoreEl.innerText = `BEST: ${memoryHighScore}`;
+      hud.style.display = 'block';
+
+      startScreen.classList.remove('active');
+      gameOverScreen.classList.remove('active');
+      state = 'PLAYING';
+
+      spawnPillar(camera.aspect * 25 + 20);
+    }
+
+    function boost() {
+      if (state === 'PLAYING') {
+        shipVelocity = config.boost;
+        createExhaustParticles();
+      } else if (state === 'START') {
+        resetGame();
+      } else if (state === 'GAMEOVER') {
+        setTimeout(() => resetGame(), 200);
+      }
+    }
+
+    function spawnPillar(xPos) {
+      const maxCenterY = config.visibleYLimit - (config.pillarGap / 2) - 5;
+      const centerY = (Math.random() * 2 - 1) * maxCenterY;
+
+      const pillarGroup = new THREE.Group();
+      pillarGroup.position.x = xPos;
+
+      // Top Pillar
+      const topY = centerY + (config.pillarGap / 2) + 30;
+      const topCore = new THREE.Mesh(pillarGeo, pillarMatCore);
+      topCore.position.y = topY;
+      pillarGroup.add(topCore);
+
+      // Top Cap (cyan ring)
+      const topCap = new THREE.Mesh(capGeo, capMat);
+      topCap.position.y = centerY + (config.pillarGap / 2);
+      pillarGroup.add(topCap);
+
+      // Bottom Pillar
+      const bottomY = centerY - (config.pillarGap / 2) - 30;
+      const bottomCore = new THREE.Mesh(pillarGeo, pillarMatCore);
+      bottomCore.position.y = bottomY;
+      pillarGroup.add(bottomCore);
+
+      // Bottom Cap (cyan ring)
+      const bottomCap = new THREE.Mesh(capGeo, capMat);
+      bottomCap.position.y = centerY - (config.pillarGap / 2);
+      pillarGroup.add(bottomCap);
+
+      scene.add(pillarGroup);
+
+      pillars.push({
+        group: pillarGroup,
+        x: xPos,
+        passed: false,
+        topBound: centerY + (config.pillarGap / 2),
+        bottomBound: centerY - (config.pillarGap / 2)
+      });
+    }
+
+    function createExhaustParticles() {
+      for (let i = 0; i < 3; i++) {
+        // Spherical bright fire colors
+        const colorHex = Math.random() > 0.5 ? 0xffaa00 : 0xff4400; // Yellow-Orange & Red-Orange
+        const pMat = new THREE.MeshBasicMaterial({
+          color: colorHex,
+          transparent: true,
+          blending: THREE.AdditiveBlending
+        });
+        const pMesh = new THREE.Mesh(fireGeo, pMat);
+
+        // Position behind the ship
+        pMesh.position.set(
+          shipGroup.position.x - (config.shipWidth / 2) + 1,
+          shipGroup.position.y + (Math.random() * 0.8 - 0.4),
+          (Math.random() * 0.4 - 0.2)
+        );
+
+        const scale = Math.random() * 0.8 + 0.6;
+        pMesh.scale.set(scale, scale, scale);
+        scene.add(pMesh);
+
+        particles.push({
+          mesh: pMesh,
+          vx: -(Math.random() * 0.6 + 0.6), // Move backward
+          vy: (Math.random() * 0.3 - 0.15),
+          life: 1.0
+        });
+      }
+    }
+
+    function update() {
+      // Idle background stars
+      const positions = starsSystem.geometry.attributes.position.array;
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i] -= 0.05;
+        if (positions[i] < -100) positions[i] = 100;
+      }
+      starsSystem.geometry.attributes.position.needsUpdate = true;
+
+      if (state === 'START') {
+        const time = Date.now() * 0.003;
+        shipGroup.position.y = Math.sin(time) * 1.5;
+        shipGroup.rotation.z = Math.cos(time) * 0.05;
+      }
+
+      if (state !== 'PLAYING') return;
+
+      shipVelocity += config.gravity;
+      shipGroup.position.y += shipVelocity;
+
+      const targetTilt = Math.min(Math.max(shipVelocity * 0.1, -0.4), 0.4);
+      shipGroup.rotation.z += (targetTilt - shipGroup.rotation.z) * 0.15;
+
+      // Fire Particles Update
+      for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.mesh.position.x += p.vx;
+        p.mesh.position.y += p.vy;
+        p.life -= 0.05;
+        p.mesh.material.opacity = p.life;
+        p.mesh.scale.set(p.life, p.life, p.life);
+
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          p.mesh.material.dispose();
+          particles.splice(i, 1);
+        }
+      }
+
+      if (pillars.length === 0 || (camera.aspect * 25 + 20) - pillars[pillars.length - 1].x >= config.spawnDistance) {
+        spawnPillar(camera.aspect * 25 + 20);
+      }
+
+      // Pillar logic & Collisions
+      let shipLeft = shipGroup.position.x - (config.shipWidth / 2) + 2;
+      let shipRight = shipGroup.position.x + (config.shipWidth / 2) - 2;
+      let shipTop = shipGroup.position.y + (config.shipHeight / 2) - 1.5;
+      let shipBottom = shipGroup.position.y - (config.shipHeight / 2) + 1.5;
+
+      for (let i = pillars.length - 1; i >= 0; i--) {
+        let p = pillars[i];
+        p.group.position.x -= game.speed;
+        p.x = p.group.position.x;
+
+        let pillarLeft = p.x - config.pillarRadius;
+        let pillarRight = p.x + config.pillarRadius;
+
+        let inPillarX = shipRight > pillarLeft && shipLeft < pillarRight;
+        if (inPillarX && (shipTop > p.topBound || shipBottom < p.bottomBound)) {
+          triggerGameOver();
+        }
+
+        if (!p.passed && shipGroup.position.x > p.x + config.pillarRadius) {
+          p.passed = true;
+          game.score++;
+          currentScoreEl.innerText = game.score;
+          if (game.score % 10 === 0) {
+            game.speed *= 1.05;
+            speedUpIndicator.style.opacity = 1;
+            setTimeout(() => speedUpIndicator.style.opacity = 0, 1500);
+          }
+        }
+
+        if (p.x + config.pillarRadius < -camera.aspect * 35 - 10) {
+          scene.remove(p.group);
+          pillars.splice(i, 1);
+        }
+      }
+
+      if (shipGroup.position.y > config.visibleYLimit || shipGroup.position.y < -config.visibleYLimit + 2) {
+        triggerGameOver();
+      }
+    }
+
+    function triggerGameOver() {
+      state = 'GAMEOVER';
+      hud.style.display = 'none';
+      shipVelocity = 0;
+      shipGroup.rotation.z = -Math.PI / 3;
+
+      if (game.score > memoryHighScore) {
+        memoryHighScore = game.score;
+        try { localStorage.setItem('starfighter3D_HighScore', memoryHighScore); } catch (e) { }
+      }
+
+      finalScoreEl.innerText = `Score: ${game.score} | Best: ${memoryHighScore}`;
+      gameOverScreen.classList.add('active');
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      update();
+      renderer.render(scene, camera);
+    }
+
+    function inputHandler(e) {
+      if (e.target.tagName.toLowerCase() === 'button') return;
+      if (e.type === 'keydown' && e.code !== 'Space' && e.code !== 'ArrowUp') return;
+      e.preventDefault();
+      boost();
+    }
+
+    window.addEventListener('keydown', inputHandler);
+    window.addEventListener('mousedown', inputHandler);
+    window.addEventListener('touchstart', inputHandler, { passive: false });
+    document.getElementById('start-btn').addEventListener('click', () => boost());
+    document.getElementById('restart-btn').addEventListener('click', () => resetGame());
+
+    window.onload = initThree;
+  </script>
+</body>
+
+</html>
